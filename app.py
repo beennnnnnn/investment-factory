@@ -2,18 +2,19 @@ import streamlit as st
 import google.generativeai as genai
 import feedparser
 from newspaper import Article
+import urllib.parse  # URL 인코딩을 위한 라이브러리 추가
 import re
 
 # --- UI 설정 ---
 st.set_page_config(page_title="Safe Investment Factory", layout="wide", page_icon="🛡️")
-st.title("📱 이동식 투자 포스팅 생성기 (보안 모드)")
-st.caption("⚠️ 본 프로그램은 API 키를 서버에 저장하지 않습니다. 브라우저를 닫으면 정보가 즉시 파기됩니다.")
+st.title("📱 이동식 투자 포스팅 생성기 (오류 수정판)")
+st.caption("⚠️ 보안을 위해 API 키는 저장되지 않으며, 검색어 공백 오류가 해결되었습니다.")
 
 # --- [사이드바] 설정 ---
 with st.sidebar:
     st.header("🔑 보안 세션 시작")
-    # 매번 직접 입력하되, 화면에는 보이지 않게 password 타입으로 설정
-    user_api_key = st.text_input("Gemini API 키를 입력하세요:", type="password", help="키는 저장되지 않으며 세션 종료 시 삭제됩니다.")
+    # API 키 수동 입력 (보안 유지)
+    user_api_key = st.text_input("Gemini API 키를 입력하세요:", type="password")
     st.caption("[키 발급처](https://aistudio.google.com/app/apikey)")
     
     st.divider()
@@ -32,9 +33,9 @@ with st.sidebar:
 
 # --- [내재화] 벤치마킹 스타일 프리셋 ---
 PRESET_STYLES = {
-    "💎 반보 스타일 (@Banbo_Insight)": "비유(맛집 등)를 사용해 복잡한 용어를 쉽게 설명. [제목] 형식을 쓰고 번호를 매겨 깔끔하게 정리.",
-    "🔥 미국개미 스타일 (@USAnt_IDEA)": "매우 공격적이고 강한 확신. '똑똑히 들어라' 등 강한 어조. 마지막은 'Powered by #USAnt'.",
-    "🌌 로켓테슬라 스타일 (@rklb_invest)": "전략적 스토리텔링. '우연은 없다, 의도만 존재할 뿐' 문구 활용. 긴 호흡의 분석.",
+    "💎 반보 스타일 (@Banbo_Insight)": "비유(맛집 등) 활용 및 번호 매기기. [제목] 형식 사용.",
+    "🔥 미국개미 스타일 (@USAnt_IDEA)": "공격적이고 강한 확신. '똑똑히 들어라' 사용. 마무리 'Powered by #USAnt'.",
+    "🌌 로켓테슬라 스타일 (@rklb_invest)": "전략적 스토리텔링. '우연은 없다, 의도만 존재할 뿐' 문구 활용.",
     "➕ [커스텀] 메모장 업로드": "custom"
 }
 
@@ -55,28 +56,35 @@ if st.button("🚀 포스팅 생성 (딸깍!)"):
         st.error("말투 스타일이 설정되지 않았습니다.")
     else:
         try:
-            # 입력된 키를 세션 내에서만 사용
             genai.configure(api_key=user_api_key)
             model = genai.GenerativeModel('gemini-1.5-flash')
             
             with st.spinner("정보를 수집하여 전문가의 글로 변환 중..."):
-                rss_url = f"https://news.google.com/rss/search?q={search_keyword}&hl=ko&gl=KR&ceid=KR:ko"
+                # [핵심 수정] 검색어의 공백을 URL용 문자로 변환 (%20 등)
+                encoded_keyword = urllib.parse.quote(search_keyword)
+                rss_url = f"https://news.google.com/rss/search?q={encoded_keyword}&hl=ko&gl=KR&ceid=KR:ko"
+                
                 feed = feedparser.parse(rss_url)
                 news_data = ""
-                for entry in feed.entries[:news_count]:
-                    try:
-                        article = Article(entry.link)
-                        article.download()
-                        article.parse()
-                        news_data += f"\n제목: {entry.title}\n내용: {article.text[:1000]}\n---"
-                    except: continue
-
-                prompt = f"뉴스 정보: {news_data}\n\n말투 스타일 가이드: {selected_style_content}\n\n위 스타일을 복제해 X 포스팅을 쓰고 영어 이미지 프롬프트도 1줄 추가해."
-                response = model.generate_content(prompt)
                 
-                st.divider()
-                st.subheader("✅ 생성된 결과물")
-                st.code(response.text, language='text')
-                st.balloons()
+                if not feed.entries:
+                    st.warning("수집된 뉴스가 없습니다. 키워드를 확인해 주세요.")
+                else:
+                    for entry in feed.entries[:news_count]:
+                        try:
+                            article = Article(entry.link)
+                            article.download()
+                            article.parse()
+                            news_data += f"\n제목: {entry.title}\n내용: {article.text[:1000]}\n---"
+                        except: continue
+
+                    # AI가 벤치마킹한 스타일로 내용 생성
+                    prompt = f"뉴스 정보: {news_data}\n\n말투 스타일 가이드: {selected_style_content}\n\n위 스타일을 복제해 포스팅을 써줘. 이미지 프롬프트(영어)도 1줄 추가해."
+                    response = model.generate_content(prompt)
+                    
+                    st.divider()
+                    st.subheader("✅ 생성된 결과물")
+                    st.code(response.text, language='text')
+                    st.balloons()
         except Exception as e:
-            st.error(f"오류가 발생했습니다(키 확인 필요): {e}")
+            st.error(f"오류가 발생했습니다: {e}")
