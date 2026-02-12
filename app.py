@@ -67,7 +67,7 @@ if st.button("🚀 포스팅 생성 (딸깍!)"):
     else:
         try:
             genai.configure(api_key=user_api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-flash-latest')
             
             with st.spinner("최신 정보를 수집하여 전문가의 글로 변환 중..."):
                 encoded_keyword = urllib.parse.quote(search_keyword)
