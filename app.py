@@ -1,16 +1,15 @@
 import streamlit as st
 import google.generativeai as genai
 import feedparser
-from newspaper import Article
+from newspaper import Article, Config
 import urllib.parse
-import re
 
 # --- 1. UI 설정 ---
 st.set_page_config(page_title="머스크노미 랩 (Muskonomy Lab)", layout="wide", page_icon="🚀")
 st.title("🚀 머스크노미 랩 (Muskonomy Lab)")
-st.caption("📱 데이터 기반의 정교한 분석 리포트 공장")
+st.caption("📱 스타일 수정 후 발생한 수집 오류를 해결한 복구 버전입니다.")
 
-# --- 2. 사이드바: 검색어 최적화 (검색 성공률을 위해 키워드 단축) ---
+# --- 2. 사이드바: 설정 (잘 작동하던 키워드로 복구) ---
 with st.sidebar:
     st.header("🔑 보안 세션")
     user_api_key = st.text_input("Gemini API 키 입력:", type="password")
@@ -18,17 +17,17 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ 정보 수집 설정")
     
-    # [수정] 검색이 잘 되도록 키워드를 핵심 종목명 위주로 짧게 수정했습니다.
+    # 아까 잘 됐던 시절의 직관적인 키워드들로 다시 되돌렸습니다.
     DEFAULT_THEMES = {
+        "🧠 머스크노미 (Tesla/xAI)": "Tesla xAI Elon Musk",
         "🇰🇷 국장 시황 (코스피/코스닥)": "코스피 코스닥 시황",
-        "🌎 거시경제 (환율/금리)": "환율 금리 전망",
+        "🌎 거시경제 (환율/금리)": "환율 금리",
         "💾 반도체 (삼성/SK/한미)": "삼성전자 SK하이닉스 한미반도체",
         "🔋 2차전지 (SDI/에코프로)": "삼성SDI 에코프로 에코프로비엠",
         "🚗 모빌리티 (현대차/만도)": "현대차 HL만도",
         "🤖 로봇 (레인보우)": "레인보우로보틱스 로봇",
         "🚀 방산/우주 (한화에어로)": "한화에어로스페이스 방산",
         "⚡ 중공업 (효성중공업)": "효성중공업 전력",
-        "🧠 머스크노미 (Tesla/xAI)": "Tesla xAI Elon Musk",
         "📈 나스닥/미장 시황": "Nasdaq 100 stock",
         "₿ 비트코인/코인": "Bitcoin crypto news",
         "➕ 직접 입력": "custom"
@@ -38,35 +37,46 @@ with st.sidebar:
     search_keyword = st.text_input("검색어:") if selected_theme == "➕ 직접 입력" else DEFAULT_THEMES[selected_theme]
     news_count = st.slider("국가별 참고 뉴스 개수", 1, 5, 3)
 
-# --- 3. 문체 스타일 가이드 ---
+# --- 3. 스타일 가이드 (테슬라 언급 삭제, 문체만 유지) ---
 PRESET_STYLES = {
-    "🌌 로켓테슬라 스타일 (@rklb_invest)": "논리적 인과관계를 중시하는 전략적 스토리텔링. '우연은 없다, 의도만 존재할 뿐'이라는 문구를 도입부에 활용하며, 깊이 있는 타래 형식을 선호함.",
-    "☀️ 미국개미 스타일 (@USAnt_IDEA)": "열정적이고 친절한 멘토링. 핵심 데이터를 명확하게 짚어주며 독자들을 응원하는 긍정적인 톤. 마무리 문구 'Powered by #USAnt' 고수.",
-    "💎 반보 스타일 (@Banbo_Insight)": "비유와 예시를 활용한 다정하고 쉬운 설명. [제목] 형식을 반드시 사용하고 번호를 매겨 정보를 구조화함.",
-    "➕ 직접 스타일 업로드": "custom"
+    "🌌 로켓테슬라 스타일 (@rklb_invest)": "논리적 인과관계를 중시하는 전략적 스토리텔링. '우연은 없다, 의도만 존재할 뿐' 문구를 도입부에 활용하며 깊이 있는 분석 수행.",
+    "☀️ 미국개미 스타일 (@USAnt_IDEA)": "열정적이고 친절한 멘토링. 핵심 데이터를 명확하게 짚어주는 긍정적인 톤. 마무리 문구 'Powered by #USAnt'.",
+    "💎 반보 스타일 (@Banbo_Insight)": "비유와 예시를 활용한 쉬운 설명. [제목] 형식을 사용하고 정보를 다정하게 구조화함."
 }
 
-st.subheader("✍️ 분석 페르소나 선택")
-selected_style_key = st.selectbox("누구의 문체로 분석할까요?", list(PRESET_STYLES.keys()))
+selected_style_key = st.selectbox("분석 페르소나:", list(PRESET_STYLES.keys()))
 style_content = PRESET_STYLES[selected_style_key]
 
-# --- 4. 뉴스 수집 함수 ---
-def fetch_global_news(keyword, lang, geo, count):
+# --- 4. 뉴스 수집 함수 (차단 방지 및 디버깅 강화) ---
+def fetch_news_safe(keyword, lang, geo, count):
+    config = Config()
+    config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+    
     encoded_q = urllib.parse.quote(keyword)
     url = f"https://news.google.com/rss/search?q={encoded_q}&hl={lang}&gl={geo}&ceid={geo}:{lang}"
+    
+    # 디버그용: 실제 생성된 RSS 주소를 화면에 출력 (나중에 지워도 됩니다)
+    # st.write(f"🔍 검색 URL: {url}") 
+    
     feed = feedparser.parse(url)
     results = []
-    for entry in feed.entries[:count]:
+    
+    for entry in feed.entries[:count*2]:
+        if len(results) >= count: break
         try:
-            article = Article(entry.link)
+            article = Article(entry.link, config=config)
             article.download(); article.parse()
-            if len(article.text) > 200: # 텍스트가 너무 짧은 광고성 링크 제외
-                results.append({"title": entry.title, "link": entry.link, "image": article.top_image, "text": article.text[:1200]})
+            # 텍스트가 조금이라도 있으면 일단 수집 (조건 완화)
+            content = article.text if len(article.text) > 50 else entry.get('summary', entry.title)
+            results.append({
+                "title": entry.title, "link": entry.link,
+                "image": article.top_image, "text": content[:1200]
+            })
         except: continue
     return results
 
 # --- 5. 실행 로직 ---
-if st.button("🚀 분석 리포트 생성 시작"):
+if st.button("🚀 리포트 생성 시작"):
     if not user_api_key or not search_keyword:
         st.error("API 키와 주제를 확인해 주세요.")
     else:
@@ -74,18 +84,17 @@ if st.button("🚀 분석 리포트 생성 시작"):
             genai.configure(api_key=user_api_key)
             model = genai.GenerativeModel('gemini-flash-latest')
             
-            with st.spinner("데이터 수집 및 번역 중..."):
-                # 미국 뉴스용 검색어 번역
-                us_keyword = model.generate_content(f"Translate '{search_keyword}' to a short English news search keyword. Keyword only.").text.strip()
+            with st.spinner("최신 정보를 수집하고 있습니다..."):
+                # 미국용 키워드 번역 (짧고 강력하게)
+                us_keyword = model.generate_content(f"Translate '{search_keyword}' to 1-2 English news keywords. Result only.").text.strip()
                 
-                kr_news = fetch_global_news(search_keyword, "ko", "KR", news_count)
-                us_news = fetch_global_news(us_keyword, "en", "US", news_count)
+                kr_news = fetch_news_safe(search_keyword, "ko", "KR", news_count)
+                us_news = fetch_news_safe(us_keyword, "en", "US", news_count)
                 all_news = kr_news + us_news
 
             if not all_news:
-                st.warning(f"'{search_keyword}'에 대한 최신 뉴스를 찾을 수 없습니다. 검색어를 더 짧게 수정해 보세요.")
+                st.error(f"🚨 '{search_keyword}' 뉴스 수집 실패. 검색어를 더 짧게 입력해 보세요.")
             else:
-                # 시각화
                 st.subheader("📰 분석 데이터 원본")
                 cols = st.columns(3)
                 for idx, news in enumerate(all_news):
@@ -93,21 +102,15 @@ if st.button("🚀 분석 리포트 생성 시작"):
                         if news['image']: st.image(news['image'], use_container_width=True)
                         st.markdown(f"**[{news['title']}]({news['link']})**")
                 
-                with st.spinner("리포트 작성 중..."):
-                    context = "\n".join([f"기사제목: {n['title']}\n내용: {n['text']}" for n in all_news])
-                    final_prompt = f"""
-                    [지침]:
-                    - 반드시 제공된 [뉴스 데이터]의 내용만 분석하라.
-                    - 데이터가 부족해도 절대 다른 종목(테슬라 등)을 끌어오지 마라.
-                    - 오직 [말투 가이드]의 문체(톤, 형식)만 가져와서 친절하게 작성하라.
-
-                    [뉴스 데이터]:
-                    {context}
-                    
-                    [말투 가이드]:
-                    {style_content}
+                with st.spinner("분석 중..."):
+                    context = "\n".join([f"기사: {n['text']}" for n in all_news])
+                    # 주제 집중을 위한 강력한 지침
+                    prompt = f"""
+                    지침: 제공된 [데이터] 내용에만 100% 집중해라. 테슬라 등 관련 없는 내용은 언급하지 마라.
+                    데이터: {context}
+                    말투: {style_content}
                     """
-                    response = model.generate_content(final_prompt)
+                    response = model.generate_content(prompt)
                     
                     st.divider()
                     st.subheader("✅ 머스크노미 랩 분석 결과")
@@ -115,3 +118,4 @@ if st.button("🚀 분석 리포트 생성 시작"):
                     st.balloons()
         except Exception as e:
             st.error(f"오류 발생: {e}")
+        
